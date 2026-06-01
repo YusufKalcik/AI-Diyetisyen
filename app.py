@@ -45,7 +45,7 @@ def bugunu_sifirla():
 # 1. YAPAY ZEKA MODELİNİ YÜKLEME
 @st.cache_resource
 def model_yukle():
-    return tf.keras.models.load_model("yemek_modeli.h5")
+    return tf.keras.models.load_model("yemek_modeli.h5", compile=False)
 
 try:
     model = model_yukle()
