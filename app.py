@@ -6,32 +6,44 @@ from PIL import Image
 import os
 from datetime import datetime
 
-# --- KUVVETLİ KÜRESEL YAMA (MONKEY PATCH) ---
-# TensorFlow içindeki BatchNormalization katmanının ayarlarını daha yüklenirken manipüle eder.
-# Sunucu sürüm uyuşmazlığı hatasını %100 kökten çözer.
-_orijinal_init = tf.keras.layers.BatchNormalization.__init__
-def _yamali_init(self, *args, **kwargs):
-    kwargs.pop('renorm', None)
-    kwargs.pop('renorm_clipping', None)
-    kwargs.pop('renorm_momentum', None)
-    _orijinal_init(self, *args, **kwargs)
-tf.keras.layers.BatchNormalization.__init__ = _yamali_init
+# --- GOD MODE: KÜRESEL YAMA V2 (TÜM SÜRÜM HATALARINI YOK EDER) ---
+# Sunucunun tanımadığı tüm yeni nesil parametreleri anında silen filtre
+def gereksizleri_temizle(kwargs):
+    copluk = ['renorm', 'renorm_clipping', 'renorm_momentum', 'quantization_config']
+    for kelime in copluk:
+        kwargs.pop(kelime, None)
+    return kwargs
+
+# 1. BatchNormalization Yaması
+_orijinal_bn = tf.keras.layers.BatchNormalization.__init__
+def _yamali_bn(self, *args, **kwargs):
+    _orijinal_bn(self, *args, **gereksizleri_temizle(kwargs))
+tf.keras.layers.BatchNormalization.__init__ = _yamali_bn
+
+# 2. Dense Yaması (Şu anki hatayı çözen kısım)
+_orijinal_dense = tf.keras.layers.Dense.__init__
+def _yamali_dense(self, *args, **kwargs):
+    _orijinal_dense(self, *args, **gereksizleri_temizle(kwargs))
+tf.keras.layers.Dense.__init__ = _yamali_dense
+
+# 3. Conv2D Yaması (Bir sonraki olası hatayı peşinen çözen kısım)
+_orijinal_conv = tf.keras.layers.Conv2D.__init__
+def _yamali_conv(self, *args, **kwargs):
+    _orijinal_conv(self, *args, **gereksizleri_temizle(kwargs))
+tf.keras.layers.Conv2D.__init__ = _yamali_conv
 
 
 # --- HAFIZA VE VERİ TABANI YÖNETİMİ ---
 DOSYA_GECMIS = "kullanici_gecmisi.csv"
 
-# Bugünün tarihini alıyoruz (Örn: 2026-05-31)
 bugun = datetime.now().strftime("%Y-%m-%d")
 
-# Geçmiş kayıtları getiren fonksiyon
 def kayitlari_getir():
     if os.path.exists(DOSYA_GECMIS):
         return pd.read_csv(DOSYA_GECMIS)
     else:
         return pd.DataFrame(columns=["Tarih", "İsim", "Gramaj", "Kalori", "Protein", "Karbo", "Yağ"])
 
-# Yeni öğünü kalıcı olarak kaydeden fonksiyon
 def kayit_ekle(isim, gramaj, kalori, protein, karbo, yag):
     df = kayitlari_getir()
     yeni_kayit = pd.DataFrame([{
@@ -46,15 +58,13 @@ def kayit_ekle(isim, gramaj, kalori, protein, karbo, yag):
     df = pd.concat([df, yeni_kayit], ignore_index=True)
     df.to_csv(DOSYA_GECMIS, index=False)
 
-# Bugünün kayıtlarını silen fonksiyon
 def bugunu_sifirla():
     if os.path.exists(DOSYA_GECMIS):
         df = pd.read_csv(DOSYA_GECMIS)
-        # Bugüne ait olmayanları tut (Yani bugünü silmiş oluyoruz)
         df = df[df["Tarih"] != bugun]
         df.to_csv(DOSYA_GECMIS, index=False)
 
-# 1. YAPAY ZEKA MODELİNİ YÜKLEME
+# --- YAPAY ZEKA MODELİNİ YÜKLEME ---
 @st.cache_resource
 def model_yukle():
     return tf.keras.models.load_model("yemek_modeli.h5", compile=False)
@@ -69,7 +79,7 @@ siniflar = ['pizza', 'hamburger', 'sushi']
 if "gecici_analiz" not in st.session_state:
     st.session_state.gecici_analiz = None
 
-# 3. BESİN DEĞERLERİNİ GETİR (CSV'DEN)
+# --- BESİN DEĞERLERİNİ GETİR ---
 def csv_degerlerini_getir(yemek_adi):
     try:
         df = pd.read_csv("nutrition_dataset.csv")
@@ -91,10 +101,9 @@ def csv_degerlerini_getir(yemek_adi):
 
 porsiyon_tanimlari = {"hamburger": 200, "pizza": 300, "sushi": 150}
 
-# 4. WEB ARAYÜZÜ TASARIMI
+# --- WEB ARAYÜZÜ TASARIMI ---
 st.set_page_config(page_title="AI Diyetisyen", page_icon="🥗", layout="centered")
 
-# --- SOL YAN MENÜ (SIDEBAR) ---
 with st.sidebar:
     st.header("👤 Sağlık Profilini Düzenle")
     
@@ -123,7 +132,6 @@ with st.sidebar:
     st.metric("🎯 Günlük Hedef", f"{int(hedef_kalori)} kcal")
 
 
-# --- ANA EKRAN (ÜST KISIM): FOTOĞRAF VE ANALİZ ---
 st.markdown("<h1 style='text-align: center;'>🥗 AI Diyetisyen & Akıllı Takip</h1>", unsafe_allow_html=True)
 st.divider()
 
@@ -161,7 +169,6 @@ if yuklenen_resim is not None:
             final_gramaj = porsiyon_miktari * porsiyon_tanimlari[dogrulanan_yemek] if giris_tipi == "🍽️ Porsiyon" else gramaj_miktari
             oran = final_gramaj / 100.0
             
-            # Veri tabanına (CSV) kaydediyoruz!
             kayit_ekle(
                 isim=dogrulanan_yemek.capitalize(),
                 gramaj=int(final_gramaj),
@@ -177,15 +184,10 @@ if yuklenen_resim is not None:
 
 st.divider()
 
-# --- ANA EKRAN (ALT KISIM): SEKMELİ ÖZET ALANI ---
 df_tum_kayitlar = kayitlari_getir()
-
-# SEKMELER (TABS) OLUŞTURULUYOR
 tab1, tab2 = st.tabs(["📊 Bugünün Özeti", "📈 Geçmiş & Raporlar"])
 
-# TAB 1: BUGÜN
 with tab1:
-    # Sadece bugünün tarihine ait olanları filtrele
     df_bugun = df_tum_kayitlar[df_tum_kayitlar["Tarih"] == bugun]
     
     if df_bugun.empty:
@@ -214,20 +216,17 @@ with tab1:
         m4.metric("🥑 Yağ", f"{toplam_yag:.1f} g")
         
         st.write("📋 **Bugün Yediklerim:**")
-        # Tarih sütununu gizleyip listeyi gösteriyoruz
         st.dataframe(df_bugun.drop(columns=["Tarih"]), use_container_width=True)
         
         if st.button("🗑️ Bugünün Kayıtlarını Sil"):
             bugunu_sifirla()
             st.rerun()
 
-# TAB 2: GEÇMİŞ HAFIZA
 with tab2:
     if df_tum_kayitlar.empty:
         st.info("Henüz geçmişe dönük bir veriniz bulunmuyor.")
     else:
         st.markdown("### 📅 Günlük Kalori Tüketimi Grafiği")
-        # Günlere göre kalori toplamını alıp çubuk grafiğe çeviriyoruz
         gunluk_kaloriler = df_tum_kayitlar.groupby("Tarih")["Kalori"].sum()
         st.bar_chart(gunluk_kaloriler, color="#ff4b4b")
         
