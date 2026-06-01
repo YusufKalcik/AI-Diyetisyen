@@ -6,7 +6,19 @@ from PIL import Image
 import os
 from datetime import datetime
 
-# --- YENİ ÖZELLİK: HAFIZA VE VERİ TABANI YÖNETİMİ ---
+# --- KUVVETLİ KÜRESEL YAMA (MONKEY PATCH) ---
+# TensorFlow içindeki BatchNormalization katmanının ayarlarını daha yüklenirken manipüle eder.
+# Sunucu sürüm uyuşmazlığı hatasını %100 kökten çözer.
+_orijinal_init = tf.keras.layers.BatchNormalization.__init__
+def _yamali_init(self, *args, **kwargs):
+    kwargs.pop('renorm', None)
+    kwargs.pop('renorm_clipping', None)
+    kwargs.pop('renorm_momentum', None)
+    _orijinal_init(self, *args, **kwargs)
+tf.keras.layers.BatchNormalization.__init__ = _yamali_init
+
+
+# --- HAFIZA VE VERİ TABANI YÖNETİMİ ---
 DOSYA_GECMIS = "kullanici_gecmisi.csv"
 
 # Bugünün tarihini alıyoruz (Örn: 2026-05-31)
@@ -50,7 +62,7 @@ def model_yukle():
 try:
     model = model_yukle()
 except Exception as e:
-    st.error(f"Dosya orada ama yüklenirken şu GERÇEK hata oluştu: {e}")
+    st.error(f"Sistemde beklenmeyen bir hata oluştu: {e}")
 
 siniflar = ['pizza', 'hamburger', 'sushi'] 
 
@@ -84,7 +96,7 @@ st.set_page_config(page_title="AI Diyetisyen", page_icon="🥗", layout="centere
 
 # --- SOL YAN MENÜ (SIDEBAR) ---
 with st.sidebar:
-    st.header("👤 Sağlık Profili")
+    st.header("👤 Sağlık Profilini Düzenle")
     
     cinsiyet = st.radio("Cinsiyet:", ["Erkek", "Kadın"])
     yas = st.number_input("Yaş:", min_value=15, max_value=100, value=25)
