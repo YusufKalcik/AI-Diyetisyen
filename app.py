@@ -6,8 +6,8 @@ from PIL import Image
 import os
 from datetime import datetime
 
-# --- 1. SAYFA AYARLARI (Her şeyden önce gelmeli) ---
-st.set_page_config(page_title="AI Diyetisyen V2", page_icon="🥗", layout="centered")
+# --- 1. SAYFA AYARLARI ---
+st.set_page_config(page_title="AI Diyetisyen V3.3", page_icon="🥗", layout="centered")
 
 
 # --- 2. GOD MODE: KÜRESEL SÜRÜM YAMASI ---
@@ -40,19 +40,28 @@ bugun = datetime.now().strftime("%Y-%m-%d")
 def profilleri_getir():
     if os.path.exists(PROFILLER_DOSYASI):
         return pd.read_csv(PROFILLER_DOSYASI)
-    return pd.DataFrame(columns=["İsim", "Cinsiyet", "Yaş", "Boy", "Kilo", "Hedef"])
+    return pd.DataFrame(columns=["İsim", "Sifre", "Cinsiyet", "Yaş", "Boy", "Kilo", "Hedef"])
 
-def profil_kaydet(isim, cinsiyet, yas, boy, kilo, hedef):
+def profil_kaydet(isim, sifre, cinsiyet, yas, boy, kilo, hedef):
     df = profilleri_getir()
-    # Eğer aynı isimde profil varsa güncellemek için eskisini siliyoruz
     df = df[df["İsim"].str.lower() != isim.lower()]
-    yeni_profil = pd.DataFrame([{"İsim": isim, "Cinsiyet": cinsiyet, "Yaş": yas, "Boy": boy, "Kilo": kilo, "Hedef": hedef}])
+    yeni_profil = pd.DataFrame([{"İsim": isim, "Sifre": str(sifre), "Cinsiyet": cinsiyet, "Yaş": yas, "Boy": boy, "Kilo": kilo, "Hedef": hedef}])
     df = pd.concat([df, yeni_profil], ignore_index=True)
     df.to_csv(PROFILLER_DOSYASI, index=False)
 
+def profil_sil(isim):
+    if os.path.exists(PROFILLER_DOSYASI):
+        df = pd.read_csv(PROFILLER_DOSYASI)
+        df = df[df["İsim"] != isim]
+        df.to_csv(PROFILLER_DOSYASI, index=False)
+    
+    dosya_gecmis = f"{isim.lower()}_gecmisi.csv"
+    if os.path.exists(dosya_gecmis):
+        os.remove(dosya_gecmis)
+
 def aktif_gecmis_dosyasi():
-    if "aktif_profil" in st.session_state and st.session_state.aktif_profil != "+ Yeni Profil Ekle":
-        return f"{st.session_state.aktif_profil.lower()}_gecmisi.csv"
+    if "aktif_kullanici" in st.session_state and st.session_state.aktif_kullanici is not None:
+        return f"{st.session_state.aktif_kullanici.lower()}_gecmisi.csv"
     return "misafir_gecmisi.csv"
 
 def kayitlari_getir():
@@ -70,6 +79,13 @@ def kayit_ekle(isim, gramaj, kalori, protein, karbo, yag):
     }])
     df = pd.concat([df, yeni_kayit], ignore_index=True)
     df.to_csv(dosya, index=False)
+
+def tekil_kayit_sil(silinecek_index):
+    dosya = aktif_gecmis_dosyasi()
+    if os.path.exists(dosya):
+        df = pd.read_csv(dosya)
+        df = df.drop(index=silinecek_index)
+        df.to_csv(dosya, index=False)
 
 def bugunu_sifirla():
     dosya = aktif_gecmis_dosyasi()
@@ -96,60 +112,69 @@ if "gecici_analiz" not in st.session_state:
     st.session_state.gecici_analiz = None
 
 
-# --- 5. SOL YAN MENÜ: ÇOKLU PROFiL SİSTEMİ ---
-df_profiller = profilleri_getir()
-profil_listesi = df_profiller["İsim"].tolist() + ["+ Yeni Profil Ekle"]
-
-if "aktif_profil" not in st.session_state:
-    st.session_state.aktif_profil = profil_listesi[0]
+# --- 5. SOL YAN MENÜ: ŞİFRELİ GİRİŞ SİSTEMİ ---
+if "aktif_kullanici" not in st.session_state:
+    st.session_state.aktif_kullanici = None
 
 with st.sidebar:
-    st.header("👤 Kullanıcı Profili")
-    
-    secilen_profil = st.selectbox(
-        "Aktif Profil Seçin:", 
-        profil_listesi, 
-        index=profil_listesi.index(st.session_state.aktif_profil) if st.session_state.aktif_profil in profil_listesi else 0
-    )
-    st.session_state.aktif_profil = secilen_profil
-    st.divider()
-
-    # --- DURUM A: YENİ PROFiL OLUŞTURMA ---
-    if secilen_profil == "+ Yeni Profil Ekle":
-        st.subheader("🆕 Yeni Profil Oluştur")
-        yeni_isim = st.text_input("İsim:")
-        cinsiyet = st.radio("Cinsiyet:", ["Erkek", "Kadın"])
-        yas = st.number_input("Yaş:", 15, 100, 25)
-        boy = st.number_input("Boy (cm):", 100, 250, 175)
-        kilo = st.number_input("Kilo (kg):", 30, 200, 70)
-        hedef = st.selectbox("Hedefiniz:", ["Kilo Korumak", "Kilo Vermek", "Kilo Almak"])
+    if st.session_state.aktif_kullanici is None:
+        st.header("🔐 Sisteme Giriş")
+        islem = st.radio("Bir işlem seçin:", ["Giriş Yap", "Yeni Kayıt Ol"], horizontal=True)
+        st.divider()
         
-        if st.button("💾 Profili Kaydet", use_container_width=True):
-            if yeni_isim.strip():
-                profil_kaydet(yeni_isim.strip(), cinsiyet, yas, boy, kilo, hedef)
-                st.session_state.aktif_profil = yeni_isim.strip()
-                st.success(f"{yeni_isim} profili başarıyla oluşturuldu!")
-                st.rerun()
-            else:
-                st.error("Lütfen geçerli bir isim girin!")
+        if islem == "Giriş Yap":
+            isim_giris = st.text_input("👤 Kullanıcı Adı:")
+            sifre_giris = st.text_input("🔑 Şifre:", type="password")
+            
+            if st.button("🚀 Giriş Yap", use_container_width=True):
+                df_prof = profilleri_getir()
+                eslesme = df_prof[(df_prof["İsim"].str.lower() == isim_giris.lower().strip()) & (df_prof["Sifre"].astype(str) == sifre_giris.strip())]
+                
+                if not eslesme.empty:
+                    st.session_state.aktif_kullanici = eslesme.iloc[0]["İsim"]
+                    st.success("Giriş başarılı!")
+                    st.rerun()
+                else:
+                    st.error("Kullanıcı adı veya şifre hatalı!")
+                    
+        else:
+            yeni_isim = st.text_input("👤 Yeni Kullanıcı Adı:")
+            yeni_sifre = st.text_input("🔑 Bir Şifre Belirleyin:", type="password")
+            cinsiyet = st.radio("Cinsiyet:", ["Erkek", "Kadın"])
+            yas = st.number_input("Yaş:", 15, 100, 25)
+            boy = st.number_input("Boy (cm):", 100, 250, 175)
+            kilo = st.number_input("Kilo (kg):", 30, 200, 70)
+            hedef = st.selectbox("Hedefiniz:", ["Kilo Korumak", "Kilo Vermek", "Kilo Almak"])
+            
+            if st.button("💾 Kayıt Ol ve Başla", use_container_width=True):
+                df_prof = profilleri_getir()
+                if yeni_isim.strip().lower() in df_prof["İsim"].str.lower().values:
+                    st.error("⚠️ Bu kullanıcı adı zaten alınmış, lütfen başka bir ad seçin.")
+                elif len(yeni_isim.strip()) == 0 or len(yeni_sifre.strip()) == 0:
+                    st.error("⚠️ Kullanıcı adı ve şifre boş bırakılamaz!")
+                else:
+                    profil_kaydet(yeni_isim.strip(), yeni_sifre.strip(), cinsiyet, yas, boy, kilo, hedef)
+                    st.session_state.aktif_kullanici = yeni_isim.strip()
+                    st.success("Kayıt başarılı!")
+                    st.rerun()
 
-    # --- DURUM B: MEVCUT PROFiLÜ YÜKLEME VE DÜZENLEME ---
     else:
-        p_veri = df_profiller[df_profiller["İsim"] == secilen_profil].iloc[0]
+        aktif_isim = st.session_state.aktif_kullanici
+        df_prof = profilleri_getir()
+        p_veri = df_prof[df_prof["İsim"] == aktif_isim].iloc[0]
         
-        st.subheader(f"⚙️ {secilen_profil} Profilini Düzenle")
+        st.header(f"⚙️ {aktif_isim} Profili")
         cinsiyet = st.radio("Cinsiyet:", ["Erkek", "Kadın"], index=0 if p_veri["Cinsiyet"] == "Erkek" else 1)
         yas = st.number_input("Yaş:", 15, 100, int(p_veri["Yaş"]))
         boy = st.number_input("Boy (cm):", 100, 250, int(p_veri["Boy"]))
         kilo = st.number_input("Kilo (kg):", 30, 200, int(p_veri["Kilo"]))
         hedef = st.selectbox("Hedefiniz:", ["Kilo Korumak", "Kilo Vermek", "Kilo Almak"], index=["Kilo Korumak", "Kilo Vermek", "Kilo Almak"].index(p_veri["Hedef"]))
         
-        if st.button("🔄 Bilgileri Güncelle", use_container_width=True):
-            profil_kaydet(secilen_profil, cinsiyet, yas, boy, kilo, hedef)
-            st.success("Profil bilgileri güncellendi!")
+        if st.button("🔄 Bilgilerimi Güncelle", use_container_width=True):
+            profil_kaydet(aktif_isim, p_veri["Sifre"], cinsiyet, yas, boy, kilo, hedef)
+            st.success("Profil güncellendi!")
             st.rerun()
 
-        # Kalori Hesaplama Motoru
         if cinsiyet == "Erkek":
             bmr = 88.362 + (13.397 * kilo) + (4.799 * boy) - (5.677 * yas)
         else:
@@ -166,15 +191,28 @@ with st.sidebar:
         st.divider()
         st.metric("⚖️ VKI", f"{vki:.1f}")
         st.metric("🎯 Günlük Hedef", f"{int(hedef_kalori)} kcal")
+        
+        st.divider()
+        st.markdown("### 🔒 Oturum Yönetimi")
+        if st.button("🚪 Güvenli Çıkış Yap", use_container_width=True):
+            st.session_state.aktif_kullanici = None
+            st.rerun()
+            
+        with st.expander("🚨 Tehlikeli Alan"):
+            st.warning("Bu işlem geri alınamaz. Hesabınız ve tüm diyet geçmişiniz tamamen silinir.")
+            if st.button("🗑️ Hesabımı Kalıcı Olarak Sil", type="primary", use_container_width=True):
+                profil_sil(aktif_isim)
+                st.session_state.aktif_kullanici = None
+                st.rerun()
 
-# --- YENİ PROFİL EKLENİRKEN ANA EKRANI DURDURAN VE KARŞILAYAN BLOK (DÜZELTİLDİ) ---
-if secilen_profil == "+ Yeni Profil Ekle":
-    st.markdown("<h2 style='text-align: center; margin-top: 100px;'>👋 AI Diyetisyene Hoş Geldiniz!</h2>", unsafe_allow_html=True)
-    st.info("👈 Uygulamayı kullanmaya başlamak için lütfen sol menüden bilgilerinizi girip 'Profili Kaydet' butonuna basın.")
+if st.session_state.aktif_kullanici is None:
+    st.markdown("<h2 style='text-align: center; margin-top: 100px;'>🔒 AI Diyetisyene Hoş Geldiniz!</h2>", unsafe_allow_html=True)
+    st.info("👈 Kişisel diyet günlüğünüze ulaşmak için lütfen sol menüden giriş yapın veya ücretsiz kayıt olun.")
     st.stop()
 
+
 # --- 6. ANA EKRAN: FOTOĞRAF VE YAPAY ZEKA ---
-st.markdown(f"<h1 style='text-align: center;'>🥗 AI Diyetisyen ({st.session_state.aktif_profil})</h1>", unsafe_allow_html=True)
+st.markdown(f"<h1 style='text-align: center;'>🥗 Hoş Geldin, {st.session_state.aktif_kullanici}!</h1>", unsafe_allow_html=True)
 st.divider()
 
 st.markdown("### 📸 Yeni Öğün Ekle")
@@ -187,7 +225,6 @@ else:
     
 yuklenen_resim = st.file_uploader("Öğününüzün fotoğrafını seçin:", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
 
-# CSV'den besin değeri okuma fonksiyonu
 def csv_degerlerini_getir(yemek_adi):
     try:
         df = pd.read_csv("nutrition_dataset.csv")
@@ -222,7 +259,6 @@ if yuklenen_resim is not None:
             final_gramaj = porsiyon_miktari * porsiyon_tanimlari[dogrulanan_yemek] if giris_tipi == "🍽️ Porsiyon" else gramaj_miktari
             oran = final_gramaj / 100.0
             
-            # Seçili profile özel dosyaya kaydeder
             kayit_ekle(
                 isim=dogrulanan_yemek.capitalize(), gramaj=int(final_gramaj),
                 kalori=int(degerler['kalori'] * oran), protein=degerler['protein'] * oran,
@@ -242,7 +278,7 @@ tab1, tab2 = st.tabs(["📊 Bugünün Özeti", "📈 Geçmiş & Raporlar"])
 with tab1:
     df_bugun = df_tum_kayitlar[df_tum_kayitlar["Tarih"] == bugun]
     if df_bugun.empty:
-        st.info(f"{st.session_state.aktif_profil} için bugün henüz bir kayıt girmediniz.")
+        st.info("Bugün henüz bir kayıt girmediniz.")
     else:
         toplam_kalori = df_bugun['Kalori'].sum()
         toplam_protein = df_bugun['Protein'].sum()
@@ -267,11 +303,41 @@ with tab1:
         m4.metric("🥑 Yağ", f"{toplam_yag:.1f} g")
         
         st.write("📋 **Bugün Yediklerim:**")
-        st.dataframe(df_bugun.drop(columns=["Tarih"]), use_container_width=True)
         
-        if st.button("🗑️ Bugünün Kayıtlarını Sil"):
-            bugunu_sifirla()
-            st.rerun()
+        # --- YENİ ÖZEL TASARIM TABLO ---
+        # Başlıklar
+        c1, c2, c3, c4, c5, c6, c7 = st.columns([2.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
+        c1.markdown("**İsim**")
+        c2.markdown("**Gramaj**")
+        c3.markdown("**Kalori**")
+        c4.markdown("**Protein**")
+        c5.markdown("**Karbo**")
+        c6.markdown("**Yağ**")
+        c7.markdown("**İşlem**")
+        st.markdown("<hr style='margin: 0px; padding: 0px; border-bottom: 2px solid #444;'>", unsafe_allow_html=True)
+        
+        # Veri Satırları ve En Sağda Silme Butonu
+        for i, row in df_bugun.iterrows():
+            c1, c2, c3, c4, c5, c6, c7 = st.columns([2.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
+            c1.write(f"{row['İsim']}")
+            c2.write(f"{row['Gramaj']}g")
+            c3.write(f"{row['Kalori']}")
+            c4.write(f"{row['Protein']}g")
+            c5.write(f"{row['Karbo']}g")
+            c6.write(f"{row['Yağ']}g")
+            if c7.button("🗑️", key=f"sil_{i}", help="Sadece bu öğünü sil"):
+                tekil_kayit_sil(i)
+                st.rerun()
+            st.markdown("<hr style='margin: 0px; padding: 0px; border-bottom: 1px dotted #333;'>", unsafe_allow_html=True)
+        
+        st.write("") # Boşluk
+        
+        # Tasarımı düzeltilen Tüm Günü Sıfırla Kutusu
+        with st.expander("🧹 Tüm Günü Sıfırla"):
+            st.warning("Bugün eklediğiniz tüm kayıtlar silinecektir. Emin misiniz?")
+            if st.button("Tüm Kayıtları Temizle", use_container_width=True):
+                bugunu_sifirla()
+                st.rerun()
 
 with tab2:
     if df_tum_kayitlar.empty:
@@ -282,4 +348,4 @@ with tab2:
         st.bar_chart(gunluk_kaloriler, color="#ff4b4b")
         
         st.markdown("### 📂 Tüm Zamanların Veri Tabani")
-        st.dataframe(df_tum_kayitlar, use_container_width=True)
+        st.dataframe(df_tum_kayitlar, use_container_width=True, hide_index=True)
