@@ -49,8 +49,8 @@ def model_yukle():
 
 try:
     model = model_yukle()
-except:
-    st.error("Hata: 'yemek_modeli.h5' masaüstünde bulunamadı!")
+except Exception as e:
+    st.error(f"Dosya orada ama yüklenirken şu GERÇEK hata oluştu: {e}")
 
 siniflar = ['pizza', 'hamburger', 'sushi'] 
 
