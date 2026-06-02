@@ -5,9 +5,10 @@ import pandas as pd
 from PIL import Image
 import os
 from datetime import datetime
+import plotly.graph_objects as go  # YENİ EKLENEN GRAFİK KÜTÜPHANESİ
 
 # --- 1. SAYFA AYARLARI ---
-st.set_page_config(page_title="AI Diyetisyen V3.4", page_icon="🥗", layout="centered")
+st.set_page_config(page_title="AI Diyetisyen V3.5", page_icon="🥗", layout="centered")
 
 
 # --- 2. GOD MODE: KÜRESEL SÜRÜM YAMASI ---
@@ -56,13 +57,20 @@ def profil_sil(isim):
         df.to_csv(PROFILLER_DOSYASI, index=False)
     
     dosya_gecmis = f"{isim.lower()}_gecmisi.csv"
-    if os.path.exists(dosya_gecmis):
-        os.remove(dosya_gecmis)
+    if os.path.exists(dosya_gecmis): os.remove(dosya_gecmis)
+        
+    dosya_su = f"{isim.lower()}_su.csv"
+    if os.path.exists(dosya_su): os.remove(dosya_su)
 
 def aktif_gecmis_dosyasi():
     if "aktif_kullanici" in st.session_state and st.session_state.aktif_kullanici is not None:
         return f"{st.session_state.aktif_kullanici.lower()}_gecmisi.csv"
     return "misafir_gecmisi.csv"
+
+def aktif_su_dosyasi():
+    if "aktif_kullanici" in st.session_state and st.session_state.aktif_kullanici is not None:
+        return f"{st.session_state.aktif_kullanici.lower()}_su.csv"
+    return "misafir_su.csv"
 
 def kayitlari_getir():
     dosya = aktif_gecmis_dosyasi()
@@ -94,13 +102,36 @@ def bugunu_sifirla():
         df = df[df["Tarih"] != bugun]
         df.to_csv(dosya, index=False)
 
-# YENİ ÖZELLİK: Tıbbi VKI ve Hedef Kontrol Motoru (Guardrails)
+# --- SU TAKİP FONKSİYONLARI ---
+def su_getir():
+    dosya = aktif_su_dosyasi()
+    if os.path.exists(dosya):
+        df = pd.read_csv(dosya)
+        bugun_df = df[df["Tarih"] == bugun]
+        return bugun_df["Miktar"].sum() if not bugun_df.empty else 0
+    return 0
+
+def su_ekle(miktar):
+    dosya = aktif_su_dosyasi()
+    df = pd.read_csv(dosya) if os.path.exists(dosya) else pd.DataFrame(columns=["Tarih", "Miktar"])
+    yeni_kayit = pd.DataFrame([{"Tarih": bugun, "Miktar": miktar}])
+    df = pd.concat([df, yeni_kayit], ignore_index=True)
+    df.to_csv(dosya, index=False)
+
+def su_sifirla():
+    dosya = aktif_su_dosyasi()
+    if os.path.exists(dosya):
+        df = pd.read_csv(dosya)
+        df = df[df["Tarih"] != bugun]
+        df.to_csv(dosya, index=False)
+
+# Tıbbi VKI ve Hedef Kontrol Motoru
 def tıbbi_hedef_onayi(boy, kilo, hedef):
     vki = kilo / ((boy / 100) ** 2)
     if vki < 18.5 and hedef == "Kilo Vermek":
-        return False, "🚨 TIBBİ UYARI: Vücut Kitle İndeksiniz 'Zayıf' seviyesinde. AI Diyetisyen, sağlığınız için 'Kilo Vermek' hedefini onaylamaz!"
+        return False, "🚨 TIBBİ UYARI: Vücut Kitle İndeksiniz 'Zayıf'. Sağlığınız için 'Kilo Vermek' hedefini onaylamıyoruz!"
     elif vki >= 25.0 and hedef == "Kilo Almak":
-        return False, "🚨 TIBBİ UYARI: Vücut Kitle İndeksiniz yüksek. AI Diyetisyen, sağlığınız için 'Kilo Almak' hedefini onaylamaz!"
+        return False, "🚨 TIBBİ UYARI: Vücut Kitle İndeksiniz yüksek. Sağlığınız için 'Kilo Almak' hedefini onaylamıyoruz!"
     return True, ""
 
 
@@ -117,10 +148,8 @@ except Exception as e:
 siniflar = ['pizza', 'hamburger', 'sushi'] 
 porsiyon_tanimlari = {"hamburger": 200, "pizza": 300, "sushi": 150}
 
-if "gecici_analiz" not in st.session_state:
-    st.session_state.gecici_analiz = None
-if "guven_orani" not in st.session_state:
-    st.session_state.guven_orani = 0.0
+if "gecici_analiz" not in st.session_state: st.session_state.gecici_analiz = None
+if "guven_orani" not in st.session_state: st.session_state.guven_orani = 0.0
 
 
 # --- 5. SOL YAN MENÜ: ŞİFRELİ GİRİŞ SİSTEMİ ---
@@ -140,13 +169,11 @@ with st.sidebar:
             if st.button("🚀 Giriş Yap", use_container_width=True):
                 df_prof = profilleri_getir()
                 eslesme = df_prof[(df_prof["İsim"].str.lower() == isim_giris.lower().strip()) & (df_prof["Sifre"].astype(str) == sifre_giris.strip())]
-                
                 if not eslesme.empty:
                     st.session_state.aktif_kullanici = eslesme.iloc[0]["İsim"]
                     st.success("Giriş başarılı!")
                     st.rerun()
-                else:
-                    st.error("Kullanıcı adı veya şifre hatalı!")
+                else: st.error("Kullanıcı adı veya şifre hatalı!")
                     
         else:
             yeni_isim = st.text_input("👤 Yeni Kullanıcı Adı:")
@@ -159,22 +186,17 @@ with st.sidebar:
             
             if st.button("💾 Kayıt Ol ve Başla", use_container_width=True):
                 df_prof = profilleri_getir()
-                # 1. Aşama: İsim Kontrolü
                 if yeni_isim.strip().lower() in df_prof["İsim"].str.lower().values:
-                    st.error("⚠️ Bu kullanıcı adı zaten alınmış, lütfen başka bir ad seçin.")
+                    st.error("⚠️ Bu kullanıcı adı alınmış.")
                 elif len(yeni_isim.strip()) == 0 or len(yeni_sifre.strip()) == 0:
                     st.error("⚠️ Kullanıcı adı ve şifre boş bırakılamaz!")
                 else:
-                    # 2. Aşama: Tıbbi Onay Kontrolü (Hocanın İstediği Güvenlik Duvarı)
-                    onay_verildi_mi, tibbi_mesaj = tıbbi_hedef_onayi(boy, kilo, hedef)
-                    
-                    if onay_verildi_mi:
+                    onay, mesaj = tıbbi_hedef_onayi(boy, kilo, hedef)
+                    if onay:
                         profil_kaydet(yeni_isim.strip(), yeni_sifre.strip(), cinsiyet, yas, boy, kilo, hedef)
                         st.session_state.aktif_kullanici = yeni_isim.strip()
-                        st.success("Kayıt başarılı!")
                         st.rerun()
-                    else:
-                        st.error(tibbi_mesaj)
+                    else: st.error(mesaj)
 
     else:
         aktif_isim = st.session_state.aktif_kullanici
@@ -189,31 +211,22 @@ with st.sidebar:
         hedef = st.selectbox("Hedefiniz:", ["Kilo Korumak", "Kilo Vermek", "Kilo Almak"], index=["Kilo Korumak", "Kilo Vermek", "Kilo Almak"].index(p_veri["Hedef"]))
         
         if st.button("🔄 Bilgilerimi Güncelle", use_container_width=True):
-            # Tıbbi Onay Kontrolü (Güncelleme yaparken de engeller)
-            onay_verildi_mi, tibbi_mesaj = tıbbi_hedef_onayi(boy, kilo, hedef)
-            
-            if onay_verildi_mi:
+            onay, mesaj = tıbbi_hedef_onayi(boy, kilo, hedef)
+            if onay:
                 profil_kaydet(aktif_isim, p_veri["Sifre"], cinsiyet, yas, boy, kilo, hedef)
-                st.success("Profil güncellendi!")
+                st.success("Güncellendi!")
                 st.rerun()
-            else:
-                st.error(tibbi_mesaj)
+            else: st.error(mesaj)
 
-        # Kalori ve Gelişmiş VKI Hesaplama
-        if cinsiyet == "Erkek":
-            bmr = 88.362 + (13.397 * kilo) + (4.799 * boy) - (5.677 * yas)
-        else:
-            bmr = 447.593 + (9.247 * kilo) + (3.098 * boy) - (4.330 * yas)
+        if cinsiyet == "Erkek": bmr = 88.362 + (13.397 * kilo) + (4.799 * boy) - (5.677 * yas)
+        else: bmr = 447.593 + (9.247 * kilo) + (3.098 * boy) - (4.330 * yas)
             
         gunluk_ihtiyac = bmr * 1.375 
-        
         if hedef == "Kilo Vermek": hedef_kalori = gunluk_ihtiyac - 500
         elif hedef == "Kilo Almak": hedef_kalori = gunluk_ihtiyac + 400
         else: hedef_kalori = gunluk_ihtiyac
             
         vki = kilo / ((boy/100)**2)
-        
-        # VKI Tıbbi Sınıflandırma
         if vki < 18.5: vki_durum = "Zayıf"
         elif vki < 25.0: vki_durum = "Normal"
         elif vki < 30.0: vki_durum = "Fazla Kilolu"
@@ -230,7 +243,6 @@ with st.sidebar:
             st.rerun()
             
         with st.expander("🚨 Tehlikeli Alan"):
-            st.warning("Bu işlem geri alınamaz. Hesabınız ve tüm diyet geçmişiniz tamamen silinir.")
             if st.button("🗑️ Hesabımı Kalıcı Olarak Sil", type="primary", use_container_width=True):
                 profil_sil(aktif_isim)
                 st.session_state.aktif_kullanici = None
@@ -249,10 +261,8 @@ st.divider()
 st.markdown("### 📸 Yeni Öğün Ekle")
 giris_tipi = st.radio("Miktar:", ["🍽️ Porsiyon", "📏 Gramaj"], horizontal=True)
 
-if giris_tipi == "🍽️ Porsiyon":
-    porsiyon_miktari = st.slider("Miktar (Porsiyon):", 0.5, 5.0, 1.0, 0.5)
-else:
-    gramaj_miktari = st.slider("Miktar (Gram):", 50, 1500, 200, 50)
+if giris_tipi == "🍽️ Porsiyon": porsiyon_miktari = st.slider("Miktar (Porsiyon):", 0.5, 5.0, 1.0, 0.5)
+else: gramaj_miktari = st.slider("Miktar (Gram):", 50, 1500, 200, 50)
     
 yuklenen_resim = st.file_uploader("Öğününüzün fotoğrafını seçin:", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
 
@@ -264,8 +274,7 @@ def csv_degerlerini_getir(yemek_adi):
         if not eslesme.empty:
             ilk_satir = eslesme.iloc[0]
             return {"kalori": float(ilk_satir['calories']), "protein": float(ilk_satir['protein']), "karbo": float(ilk_satir['carbs']), "yag": float(ilk_satir['fat'])}
-    except:
-        pass
+    except: pass
     yedek_veriler = {"hamburger": {"kalori": 295, "protein": 14, "karbo": 24, "yag": 14}, "pizza": {"kalori": 266, "protein": 11, "karbo": 33, "yag": 10}, "sushi": {"kalori": 143, "protein": 4, "karbo": 32, "yag": 4}}
     return yedek_veriler.get(yemek_adi, {"kalori": 100, "protein": 5, "karbo": 15, "yag": 2})
 
@@ -279,17 +288,13 @@ if yuklenen_resim is not None:
             img_array = tf.keras.preprocessing.image.img_to_array(img_resized)
             img_array = tf.expand_dims(img_array, 0)
             
-            # YENİ ÖZELLİK: Güven Oranını Çekme
             tahmin_matrisi = model.predict(img_array)[0]
             en_yuksek_index = np.argmax(tahmin_matrisi)
-            
             st.session_state.gecici_analiz = siniflar[en_yuksek_index]
             st.session_state.guven_orani = tahmin_matrisi[en_yuksek_index] * 100
     
     if st.session_state.gecici_analiz:
-        # Ekranda % oranını gösterme
-        st.info(f"🤖 Yapay Zeka Tahmini: **{st.session_state.gecici_analiz.upper()}** *(%{st.session_state.guven_orani:.1f} güven oranı ile)*")
-        
+        st.info(f"🤖 Yapay Zeka Tahmini: **{st.session_state.gecici_analiz.upper()}** *(%{st.session_state.guven_orani:.1f} güven)*")
         dogrulanan_yemek = st.selectbox("Hatalıysa doğrusunu seçin:", siniflar, index=siniflar.index(st.session_state.gecici_analiz))
         
         if st.button("✅ Kalıcı Olarak Günlüğe Ekle", type="primary", use_container_width=True):
@@ -297,18 +302,29 @@ if yuklenen_resim is not None:
             final_gramaj = porsiyon_miktari * porsiyon_tanimlari[dogrulanan_yemek] if giris_tipi == "🍽️ Porsiyon" else gramaj_miktari
             oran = final_gramaj / 100.0
             
-            kayit_ekle(
-                isim=dogrulanan_yemek.capitalize(), gramaj=int(final_gramaj),
-                kalori=int(degerler['kalori'] * oran), protein=degerler['protein'] * oran,
-                karbo=degerler['karbo'] * oran, yag=degerler['yag'] * oran
-            )
+            kayit_ekle(isim=dogrulanan_yemek.capitalize(), gramaj=int(final_gramaj), kalori=int(degerler['kalori'] * oran), protein=degerler['protein'] * oran, karbo=degerler['karbo'] * oran, yag=degerler['yag'] * oran)
             st.session_state.gecici_analiz = None 
             st.session_state.guven_orani = 0.0
-            st.success("Günlüğünüze başarıyla eklendi!")
+            st.success("Günlüğünüze eklendi!")
             st.rerun()
 
 st.divider()
 
+# --- PLOTLY GRAFİK ÇİZİCİ FONKSİYON ---
+def makro_grafik(baslik, alinan, hedef, renk):
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number", value = alinan,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': baslik, 'font': {'size': 18, 'color': 'white'}},
+        number = {'suffix': "g", 'font': {'color': 'white'}},
+        gauge = {
+            'axis': {'range': [None, max(hedef, alinan) * 1.2], 'visible': False},
+            'bar': {'color': renk},
+            'bgcolor': "rgba(255,255,255,0.1)",
+            'steps': [{'range': [0, hedef], 'color': "rgba(255,255,255,0.05)"}],
+        }))
+    fig.update_layout(height=200, margin=dict(l=10, r=10, t=40, b=10), paper_bgcolor="rgba(0,0,0,0)")
+    return fig
 
 # --- 7. SEKMELİ ANALİZ ALANI ---
 df_tum_kayitlar = kayitlari_getir()
@@ -316,33 +332,60 @@ tab1, tab2 = st.tabs(["📊 Bugünün Özeti", "📈 Geçmiş & Raporlar"])
 
 with tab1:
     df_bugun = df_tum_kayitlar[df_tum_kayitlar["Tarih"] == bugun]
-    if df_bugun.empty:
-        st.info("Bugün henüz bir kayıt girmediniz.")
-    else:
-        toplam_kalori = df_bugun['Kalori'].sum()
+    
+    # 1. KALORİ BARI
+    toplam_kalori = df_bugun['Kalori'].sum() if not df_bugun.empty else 0
+    kalan_kalori = int(hedef_kalori) - toplam_kalori
+    oran_bar = min(max(toplam_kalori / hedef_kalori, 0.0), 1.0)
+    
+    st.write(f"**Günlük Alınan Enerji:** {toplam_kalori} / {int(hedef_kalori)} kcal")
+    st.progress(oran_bar)
+    
+    if kalan_kalori > 0: st.success(f"💡 Hedefinize ulaşmak için hala **{kalan_kalori} kcal** yiyebilirsiniz.")
+    else: st.error(f"⚠️ Günlük kalori hedefinizi **{abs(kalan_kalori)} kcal** aştınız!")
+        
+    # 2. RENKLİ MAKRO ÇEMBER GRAFİKLERİ
+    if not df_bugun.empty:
         toplam_protein = df_bugun['Protein'].sum()
         toplam_karbo = df_bugun['Karbo'].sum()
         toplam_yag = df_bugun['Yağ'].sum()
         
-        kalan_kalori = int(hedef_kalori) - toplam_kalori
-        oran_bar = min(max(toplam_kalori / hedef_kalori, 0.0), 1.0)
+        # Günlük kalori hedefine göre bilimsel makro hedefleri (30% Pro, 50% Karbo, 20% Yağ)
+        hedef_protein = (hedef_kalori * 0.30) / 4
+        hedef_karbo = (hedef_kalori * 0.50) / 4
+        hedef_yag = (hedef_kalori * 0.20) / 9
         
-        st.write(f"**Günlük Alınan Enerji:** {toplam_kalori} / {int(hedef_kalori)} kcal")
-        st.progress(oran_bar)
-        
-        if kalan_kalori > 0:
-            st.success(f"💡 Hedefinize ulaşmak için hala **{kalan_kalori} kcal** yiyebilirsiniz.")
-        else:
-            st.error(f"⚠️ Günlük kalori hedefinizi **{abs(kalan_kalori)} kcal** aştınız!")
-            
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("🔥 Kalori", f"{toplam_kalori} kcal")
-        m2.metric("🥩 Protein", f"{toplam_protein:.1f} g")
-        m3.metric("🍞 Karbo", f"{toplam_karbo:.1f} g")
-        m4.metric("🥑 Yağ", f"{toplam_yag:.1f} g")
-        
+        c1, c2, c3 = st.columns(3)
+        with c1: st.plotly_chart(makro_grafik("🥩 Protein", toplam_protein, hedef_protein, "#FF4B4B"), use_container_width=True)
+        with c2: st.plotly_chart(makro_grafik("🍞 Karbonhidrat", toplam_karbo, hedef_karbo, "#FFA500"), use_container_width=True)
+        with c3: st.plotly_chart(makro_grafik("🥑 Yağ", toplam_yag, hedef_yag, "#00FA9A"), use_container_width=True)
+    
+    st.divider()
+
+    # 3. YENİ MODÜL: SU TAKİBİ
+    st.markdown("### 💧 Su Takibi (Hedef: 2500 ml)")
+    icilen_su = su_getir()
+    oran_su = min(icilen_su / 2500.0, 1.0)
+    
+    st.progress(oran_su)
+    st.write(f"**Günlük İçilen:** {icilen_su} ml / 2500 ml")
+    
+    s1, s2, s3, s4 = st.columns(4)
+    if s1.button("🥤 +250 ml", use_container_width=True):
+        su_ekle(250)
+        st.rerun()
+    if s2.button("🚰 +500 ml", use_container_width=True):
+        su_ekle(500)
+        st.rerun()
+    if s4.button("🔄 Sıfırla", use_container_width=True):
+        su_sifirla()
+        st.rerun()
+
+    st.divider()
+    
+    # 4. YEDİKLERİM TABLOSU
+    if not df_bugun.empty:
         st.write("📋 **Bugün Yediklerim:**")
-        
         c1, c2, c3, c4, c5, c6, c7 = st.columns([2.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
         c1.markdown("**İsim**")
         c2.markdown("**Gramaj**")
@@ -367,7 +410,6 @@ with tab1:
             st.markdown("<hr style='margin: 0px; padding: 0px; border-bottom: 1px dotted #333;'>", unsafe_allow_html=True)
         
         st.write("") 
-        
         with st.expander("🧹 Tüm Günü Sıfırla"):
             st.warning("Bugün eklediğiniz tüm kayıtlar silinecektir. Emin misiniz?")
             if st.button("Tüm Kayıtları Temizle", use_container_width=True):
