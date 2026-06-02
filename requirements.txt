@@ -3,3 +3,4 @@ tensorflow
 numpy<2.0.0
 pandas
 Pillow
+plotly
