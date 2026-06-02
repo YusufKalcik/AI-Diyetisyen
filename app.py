@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 
 # --- 1. SAYFA AYARLARI ---
-st.set_page_config(page_title="AI Diyetisyen V3.3", page_icon="🥗", layout="centered")
+st.set_page_config(page_title="AI Diyetisyen V3.4", page_icon="🥗", layout="centered")
 
 
 # --- 2. GOD MODE: KÜRESEL SÜRÜM YAMASI ---
@@ -94,6 +94,15 @@ def bugunu_sifirla():
         df = df[df["Tarih"] != bugun]
         df.to_csv(dosya, index=False)
 
+# YENİ ÖZELLİK: Tıbbi VKI ve Hedef Kontrol Motoru (Guardrails)
+def tıbbi_hedef_onayi(boy, kilo, hedef):
+    vki = kilo / ((boy / 100) ** 2)
+    if vki < 18.5 and hedef == "Kilo Vermek":
+        return False, "🚨 TIBBİ UYARI: Vücut Kitle İndeksiniz 'Zayıf' seviyesinde. AI Diyetisyen, sağlığınız için 'Kilo Vermek' hedefini onaylamaz!"
+    elif vki >= 25.0 and hedef == "Kilo Almak":
+        return False, "🚨 TIBBİ UYARI: Vücut Kitle İndeksiniz yüksek. AI Diyetisyen, sağlığınız için 'Kilo Almak' hedefini onaylamaz!"
+    return True, ""
+
 
 # --- 4. YAPAY ZEKA MODELiNi YÜKLEME ---
 @st.cache_resource
@@ -110,6 +119,8 @@ porsiyon_tanimlari = {"hamburger": 200, "pizza": 300, "sushi": 150}
 
 if "gecici_analiz" not in st.session_state:
     st.session_state.gecici_analiz = None
+if "guven_orani" not in st.session_state:
+    st.session_state.guven_orani = 0.0
 
 
 # --- 5. SOL YAN MENÜ: ŞİFRELİ GİRİŞ SİSTEMİ ---
@@ -148,15 +159,22 @@ with st.sidebar:
             
             if st.button("💾 Kayıt Ol ve Başla", use_container_width=True):
                 df_prof = profilleri_getir()
+                # 1. Aşama: İsim Kontrolü
                 if yeni_isim.strip().lower() in df_prof["İsim"].str.lower().values:
                     st.error("⚠️ Bu kullanıcı adı zaten alınmış, lütfen başka bir ad seçin.")
                 elif len(yeni_isim.strip()) == 0 or len(yeni_sifre.strip()) == 0:
                     st.error("⚠️ Kullanıcı adı ve şifre boş bırakılamaz!")
                 else:
-                    profil_kaydet(yeni_isim.strip(), yeni_sifre.strip(), cinsiyet, yas, boy, kilo, hedef)
-                    st.session_state.aktif_kullanici = yeni_isim.strip()
-                    st.success("Kayıt başarılı!")
-                    st.rerun()
+                    # 2. Aşama: Tıbbi Onay Kontrolü (Hocanın İstediği Güvenlik Duvarı)
+                    onay_verildi_mi, tibbi_mesaj = tıbbi_hedef_onayi(boy, kilo, hedef)
+                    
+                    if onay_verildi_mi:
+                        profil_kaydet(yeni_isim.strip(), yeni_sifre.strip(), cinsiyet, yas, boy, kilo, hedef)
+                        st.session_state.aktif_kullanici = yeni_isim.strip()
+                        st.success("Kayıt başarılı!")
+                        st.rerun()
+                    else:
+                        st.error(tibbi_mesaj)
 
     else:
         aktif_isim = st.session_state.aktif_kullanici
@@ -171,10 +189,17 @@ with st.sidebar:
         hedef = st.selectbox("Hedefiniz:", ["Kilo Korumak", "Kilo Vermek", "Kilo Almak"], index=["Kilo Korumak", "Kilo Vermek", "Kilo Almak"].index(p_veri["Hedef"]))
         
         if st.button("🔄 Bilgilerimi Güncelle", use_container_width=True):
-            profil_kaydet(aktif_isim, p_veri["Sifre"], cinsiyet, yas, boy, kilo, hedef)
-            st.success("Profil güncellendi!")
-            st.rerun()
+            # Tıbbi Onay Kontrolü (Güncelleme yaparken de engeller)
+            onay_verildi_mi, tibbi_mesaj = tıbbi_hedef_onayi(boy, kilo, hedef)
+            
+            if onay_verildi_mi:
+                profil_kaydet(aktif_isim, p_veri["Sifre"], cinsiyet, yas, boy, kilo, hedef)
+                st.success("Profil güncellendi!")
+                st.rerun()
+            else:
+                st.error(tibbi_mesaj)
 
+        # Kalori ve Gelişmiş VKI Hesaplama
         if cinsiyet == "Erkek":
             bmr = 88.362 + (13.397 * kilo) + (4.799 * boy) - (5.677 * yas)
         else:
@@ -188,8 +213,14 @@ with st.sidebar:
             
         vki = kilo / ((boy/100)**2)
         
+        # VKI Tıbbi Sınıflandırma
+        if vki < 18.5: vki_durum = "Zayıf"
+        elif vki < 25.0: vki_durum = "Normal"
+        elif vki < 30.0: vki_durum = "Fazla Kilolu"
+        else: vki_durum = "Obez"
+        
         st.divider()
-        st.metric("⚖️ VKI", f"{vki:.1f}")
+        st.metric("⚖️ VKI", f"{vki:.1f} ({vki_durum})")
         st.metric("🎯 Günlük Hedef", f"{int(hedef_kalori)} kcal")
         
         st.divider()
@@ -247,11 +278,18 @@ if yuklenen_resim is not None:
             img_resized = image.resize((224, 224))
             img_array = tf.keras.preprocessing.image.img_to_array(img_resized)
             img_array = tf.expand_dims(img_array, 0)
-            tahminler = model.predict(img_array)
-            st.session_state.gecici_analiz = siniflar[np.argmax(tahminler)]
+            
+            # YENİ ÖZELLİK: Güven Oranını Çekme
+            tahmin_matrisi = model.predict(img_array)[0]
+            en_yuksek_index = np.argmax(tahmin_matrisi)
+            
+            st.session_state.gecici_analiz = siniflar[en_yuksek_index]
+            st.session_state.guven_orani = tahmin_matrisi[en_yuksek_index] * 100
     
     if st.session_state.gecici_analiz:
-        st.info(f"🤖 Tahmin: **{st.session_state.gecici_analiz.upper()}**")
+        # Ekranda % oranını gösterme
+        st.info(f"🤖 Yapay Zeka Tahmini: **{st.session_state.gecici_analiz.upper()}** *(%{st.session_state.guven_orani:.1f} güven oranı ile)*")
+        
         dogrulanan_yemek = st.selectbox("Hatalıysa doğrusunu seçin:", siniflar, index=siniflar.index(st.session_state.gecici_analiz))
         
         if st.button("✅ Kalıcı Olarak Günlüğe Ekle", type="primary", use_container_width=True):
@@ -265,6 +303,7 @@ if yuklenen_resim is not None:
                 karbo=degerler['karbo'] * oran, yag=degerler['yag'] * oran
             )
             st.session_state.gecici_analiz = None 
+            st.session_state.guven_orani = 0.0
             st.success("Günlüğünüze başarıyla eklendi!")
             st.rerun()
 
@@ -304,8 +343,6 @@ with tab1:
         
         st.write("📋 **Bugün Yediklerim:**")
         
-        # --- YENİ ÖZEL TASARIM TABLO ---
-        # Başlıklar
         c1, c2, c3, c4, c5, c6, c7 = st.columns([2.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
         c1.markdown("**İsim**")
         c2.markdown("**Gramaj**")
@@ -316,7 +353,6 @@ with tab1:
         c7.markdown("**İşlem**")
         st.markdown("<hr style='margin: 0px; padding: 0px; border-bottom: 2px solid #444;'>", unsafe_allow_html=True)
         
-        # Veri Satırları ve En Sağda Silme Butonu
         for i, row in df_bugun.iterrows():
             c1, c2, c3, c4, c5, c6, c7 = st.columns([2.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1])
             c1.write(f"{row['İsim']}")
@@ -330,9 +366,8 @@ with tab1:
                 st.rerun()
             st.markdown("<hr style='margin: 0px; padding: 0px; border-bottom: 1px dotted #333;'>", unsafe_allow_html=True)
         
-        st.write("") # Boşluk
+        st.write("") 
         
-        # Tasarımı düzeltilen Tüm Günü Sıfırla Kutusu
         with st.expander("🧹 Tüm Günü Sıfırla"):
             st.warning("Bugün eklediğiniz tüm kayıtlar silinecektir. Emin misiniz?")
             if st.button("Tüm Kayıtları Temizle", use_container_width=True):
